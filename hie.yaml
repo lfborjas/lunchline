@@ -1,0 +1,7 @@
+cradle:
+  cabal:
+    - path: "src"
+      component: "lib:lunchline"
+
+    - path: "app/Main.hs"
+      component: "lunchline:exe:lunchline-exe"

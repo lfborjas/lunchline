@@ -4,7 +4,7 @@
 module LunchLine.App where
 
 import Data.Pool
-import Database.Persist.Sqlite
+import Database.Persist.Sqlite hiding (SqlPersistT)
 import Control.Monad.Reader
 import Control.Monad.Logger
 import LunchLine.Models
@@ -19,7 +19,12 @@ newtype AppT a = AppT
 runAppT :: MonadIO m => AppT a -> Env -> m a
 runAppT body env = liftIO $ runReaderT (unAppT body) env
 
-runDB :: ReaderT SqlBackend IO a -> AppT a
+-- NOTE: (exercise): try defining @SqlPersistT m a@  and @DB a@
+-- From: https://hackage.haskell.org/package/persistent-2.13.3.4/docs/Database-Persist-Sql.html#t:SqlPersistT
+type SqlPersistT = ReaderT SqlBackend
+type DB = SqlPersistT IO
+
+runDB :: DB a -> AppT a
 runDB body = do
   pool <- asks envPool
   liftIO $ runSqlPool body pool
@@ -33,15 +38,21 @@ runDB body = do
 runApp :: AppT ()
 runApp = do
   lineItems <- runDB $ do
-    runMigration migrateAll
     insert_ $ LineItem "Pizza" 11.0
     insert_ $ LineItem "Burger" 12.0
     selectList [] []
-  -- liftIO $ print (lineItems :: [Entity LineItem])
-  liftIO $ print (lineItems :: [Entity LineItem])
+  -- NOTE: (exercise), using type applications vs. annotations
+  -- not sure if this is what was meant though
+  liftIO $ print @[Entity LineItem] lineItems
 
 
 appMain :: IO ()
 appMain = do
-  env <- runStderrLoggingT $ Env <$> createSqlitePool ":memory:" 10
-  runAppT runApp env
+  --env <- runStderrLoggingT $ Env <$> createSqlitePool ":memory:" 10
+  runStderrLoggingT $ withSqlitePool ":memory:" 10 $ \pool -> do
+    -- NOTE: the persistent book uses `runResourceT` here
+    -- NOTE: from the exercise "figure out a way to move migrateAll to main"
+    -- from: https://www.yesodweb.com/book/persistent#persistent_integration_with_yesod
+    runSqlPool (runMigration migrateAll) pool
+    let env = Env pool
+    runAppT runApp env

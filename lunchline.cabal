@@ -37,7 +37,10 @@ library
     import: common-extensions
     import: common-ghc-options
     exposed-modules: 
-      LunchLine 
+      LunchLine
+      LunchLine.App
+      LunchLine.Models
+
     build-depends:    
       base >= 4.13 && <= 4.17
       , containers

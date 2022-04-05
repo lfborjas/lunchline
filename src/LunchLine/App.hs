@@ -8,9 +8,11 @@ import Database.Persist.Sqlite hiding (SqlPersistT)
 import Control.Monad.Reader
 import Control.Monad.Logger
 import LunchLine.Models
+import Data.List (foldl')
 
 data Env = Env
-  { envPool :: Pool SqlBackend }
+  { envPool :: Pool SqlBackend
+  }
 
 newtype AppT a = AppT
   {unAppT :: ReaderT Env IO a }
@@ -35,6 +37,12 @@ runDB body = do
 -- As for RunDB, we're in the YesodDB instance, and run in a Handler context:
 -- https://github.com/MercuryTechnologies/mercury-web-backend/blob/70aa056ab6ce6d2d7cbc03917f2983a7b5896134/src/App.hs#L194-L208
 
+weeklyBudget :: Double
+weeklyBudget = 100
+
+spend :: Double -> Entity LineItem -> Double
+spend n e = n - lineItemAmount (entityVal e)
+
 runApp :: AppT ()
 runApp = do
   lineItems <- runDB $ do
@@ -43,7 +51,8 @@ runApp = do
     selectList [] []
   -- NOTE: (exercise), using type applications vs. annotations
   -- not sure if this is what was meant though
-  liftIO $ print @[Entity LineItem] lineItems
+  let remainingBudget = foldl' spend weeklyBudget lineItems
+  liftIO . putStrLn $ "Remaining Budget:" <> show remainingBudget
 
 
 appMain :: IO ()

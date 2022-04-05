@@ -9,6 +9,8 @@ import Control.Monad.Reader
 import Control.Monad.Logger
 import LunchLine.Models
 import Data.List (foldl')
+import Data.Maybe
+import Database.Esqueleto.Experimental
 
 data Env = Env
   { envPool :: Pool SqlBackend
@@ -23,7 +25,8 @@ runAppT body env = liftIO $ runReaderT (unAppT body) env
 
 -- NOTE: (exercise): try defining @SqlPersistT m a@  and @DB a@
 -- From: https://hackage.haskell.org/package/persistent-2.13.3.4/docs/Database-Persist-Sql.html#t:SqlPersistT
-type SqlPersistT = ReaderT SqlBackend
+-- NOTE: removing the SqlPersistT alias since it actually comes from Esqueleto, too:
+--type SqlPersistT = ReaderT SqlBackend
 type DB = SqlPersistT IO
 
 runDB :: DB a -> AppT a
@@ -40,18 +43,27 @@ runDB body = do
 weeklyBudget :: Double
 weeklyBudget = 100
 
-spend :: Double -> Entity LineItem -> Double
-spend n e = n - lineItemAmount (entityVal e)
+spend :: Double -> LineItem -> Double
+spend n e = n - lineItemAmount e
+
+
+getLineItemTotal
+  :: (Num a, MonadIO m, PersistField a)
+  => SqlPersistT m a
+getLineItemTotal =
+  selectSum $ do
+    items <- from $ table @LineItem
+    pure $ sum_ $ items ^. LineItemAmount
+  where
+    selectSum = fmap (maybe 0 (fromMaybe 0 . unValue)) . selectOne
 
 runApp :: AppT ()
 runApp = do
-  lineItems <- runDB $ do
+  total <- runDB $ do
     insert_ $ LineItem "Pizza" 11.0
     insert_ $ LineItem "Burger" 12.0
-    selectList [] []
-  -- NOTE: (exercise), using type applications vs. annotations
-  -- not sure if this is what was meant though
-  let remainingBudget = foldl' spend weeklyBudget lineItems
+    getLineItemTotal
+  let remainingBudget = weeklyBudget - total
   liftIO . putStrLn $ "Remaining Budget:" <> show remainingBudget
 
 

@@ -14,6 +14,8 @@ import Control.Monad.IO.Class
 import Data.Maybe
 import Data.Time.Calendar
 import Data.Time.Clock
+import Data.Time.Calendar.Week (firstDayOfWeekOnAfter)
+import Data.Bool (bool)
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"][persistLowerCase|
 LineItem
@@ -84,3 +86,46 @@ addItem AddLineItem{addName, addAmount} = do
           now
           now
   insert_ li
+
+weeklySummary
+  :: MonadIO m
+  => Settings
+  -> SqlPersistT m (Double, [Entity LineItem])
+weeklySummary Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
+  now <- liftIO getCurrentTime
+  let theWeek = weekInterval settingsWeekStartsSunday now
+  total <- getLineItemTotal theWeek
+  items <- select $ getItemsInInterval theWeek
+  pure (settingsWeeklyBudget - total, items)
+
+-- NOTE: the below would probably not work: can't really use aggregations
+-- without grouping (or, in sqlite, it would just group implicitly)
+-- weeklySummary
+--   :: MonadIO m
+--   => Settings
+--   -> SqlPersistT m [(Entity LineItem, Value (Maybe Double))]
+-- weeklySummary Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
+--   now@(UTCTime today _) <- liftIO getCurrentTime
+--   let theWeek = weekInterval settingsWeekStartsSunday now
+--   select $ do
+--     items <- getItemsInInterval theWeek
+--     let totalSpent = sum_ $ items ^. LineItemAmount
+--     pure (items, totalSpent)
+
+
+
+
+-- NON-DB HELPERS
+
+-- | Find the start of the current and next weeks, given
+-- whether or not to start the week on Sunday, and a moment in the current day
+weekInterval :: Bool -> UTCTime -> (Day, Day)
+weekInterval startsOnSunday (UTCTime today _) =
+  (thisWeekStart, nextWeekStart)
+  where
+    nextWeekStart =
+      firstDayOfWeekOnAfter
+        (bool Sunday Monday startsOnSunday)
+        today
+    thisWeekStart =
+      addDays (-7) nextWeekStart

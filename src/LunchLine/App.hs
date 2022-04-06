@@ -13,6 +13,8 @@ import Data.List (foldl')
 import Data.Maybe
 import Database.Esqueleto.Experimental
 import Data.Time.Clock (getCurrentTime, UTCTime (UTCTime))
+import Colonnade
+import Control.Monad (void)
 
 data Env = Env
   { envPool :: Pool SqlBackend
@@ -43,32 +45,46 @@ runDB body = do
 -- https://github.com/MercuryTechnologies/mercury-web-backend/blob/70aa056ab6ce6d2d7cbc03917f2983a7b5896134/src/App.hs#L194-L208
 
 runApp :: AppT ()
-runApp = summary
+runApp = addStuff >> summary
 
+addStuff :: AppT ()
+addStuff = runDB $ do
+  addItem (AddLineItem "Pernil" 8.24)
+  addItem (AddLineItem "Pizza" 2)
+
+-- | Print the remaining budget, as well as the meals from the past week.
 summary :: AppT ()
 summary = do
-  now@(UTCTime today _)<- liftIO getCurrentTime
-  remainingBudget <- runDB $ do
+  theSummary <- runDB $ do
     settings <- selectOne getSettings
     case settings of
       Nothing -> pure Nothing
-      Just (Entity _ Settings{settingsWeeklyBudget}) -> do
-        total <- getLineItemTotal (today, today)
-        pure . Just $ settingsWeeklyBudget - total
-  liftIO $ case remainingBudget of
+      Just (Entity _ settings') -> do
+        Just <$> weeklySummary settings'
+  liftIO $ case theSummary of
     Nothing -> putStrLn "No budget set"
-    Just rb -> putStrLn $ "Remaining Budget " <> show rb
+    Just (rb, allItems) -> do
+      putStrLn $ "Remaining Budget " <> show rb
+      putStr $ ascii colItem $ map entityVal allItems
+
+colItem :: Colonnade Headed LineItem String
+colItem =
+  mconcat
+    [ headed "Name" lineItemName
+    , headed "Amount" (show . lineItemAmount)
+    , headed "Added" (show . lineItemAdded)
+    ]
 
 appMain :: IO ()
 appMain = do
   --env <- runStderrLoggingT $ Env <$> createSqlitePool ":memory:" 10
-  runStderrLoggingT $ withSqlitePool ":memory:" 10 $ \pool -> do
+  runNoLoggingT $ withSqlitePool ":memory:" 10 $ \pool -> do
     -- NOTE: the persistent book uses `runResourceT` here
     -- NOTE: from the exercise "figure out a way to move migrateAll to main"
     -- from: https://www.yesodweb.com/book/persistent#persistent_integration_with_yesod
     --runSqlPool (runMigration migrateAll) pool
     flip runSqlPool pool $ do
-      runMigration migrateAll
+      void $ runMigrationQuiet migrateAll
       bootstrapInitialSettings
     let env = Env pool
     runAppT runApp env

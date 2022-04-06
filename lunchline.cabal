@@ -40,6 +40,7 @@ library
       LunchLine
       LunchLine.App
       LunchLine.Models
+      Data.Time.Calendar.Week
 
     build-depends:    
       base >= 4.13 && <= 4.17
@@ -54,6 +55,10 @@ library
       , persistent-sqlite	
       , esqueleto
       , persistent-template
+      , colonnade
+      , colourista
+      , optparse-applicative
+      , optparse-generic
       
       
 

@@ -29,7 +29,13 @@ LineItem
 Settings
   weeklyBudget Double default=100
   weekStartsSunday Bool default=false
+  appKey String
+  Primary appKey
 |]
+
+
+singletonSettingsKey :: String
+singletonSettingsKey = "lunchline-settings"
 
 data AddLineItem = AddLineItem
   { addName :: String
@@ -37,25 +43,35 @@ data AddLineItem = AddLineItem
   , addAdded :: Maybe Day
   }
 
+data AddSettings = AddSettings
+  { setBudget :: Double
+  , setWeekStartsSunday :: Maybe Bool
+  }
+
 -- | Initialize settings unless already initialized
 bootstrapInitialSettings
   :: (MonadIO m)
   => SqlPersistT m ()
 bootstrapInitialSettings = do
-  existingSettings <- selectOne $ do
-    settingsSingleton <- from $ table @Settings
-    limit 1
-    pure settingsSingleton
+  existingSettings <- selectOne getSettings
   case existingSettings of
-    Nothing -> insert_ $ Settings 100 False
+    Nothing -> insert_ $ Settings 100 False singletonSettingsKey
     Just _es -> pure ()
 
 
 getSettings :: SqlQuery (SqlExpr (Entity Settings))
 getSettings = do
   s <- from $ table @Settings
-  limit 1
+  where_ $ s ^. #appKey ==. val singletonSettingsKey
   pure s
+
+configureSettings :: MonadIO m => AddSettings -> SqlPersistT m ()
+configureSettings AddSettings{setBudget, setWeekStartsSunday}= do
+  update $ \s -> do
+    set s [ SettingsWeeklyBudget =. val setBudget,
+            SettingsWeekStartsSunday =. val (fromMaybe False setWeekStartsSunday)]
+    where_ $ s  ^. #appKey ==. val singletonSettingsKey
+
 
 getItemsInInterval :: (Day, Day) -> SqlQuery (SqlExpr (Entity LineItem))
 getItemsInInterval (iStart, iEnd) = do

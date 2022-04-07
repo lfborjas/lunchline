@@ -1,4 +1,7 @@
 {-# LANGUAGE TypeApplications #-}
+-- NOTE: disabled these due to how Options.Generic expects to
+-- work with partial record fields.
+{-# OPTIONS_GHC -Wno-partial-fields #-}
 -- |
 
 module LunchLine.App where
@@ -25,7 +28,9 @@ newtype AppT a = AppT
 
 data LunchLineOptions
   = List
+  | Configuration
   | Add { name :: String, amount :: Double, added :: Maybe Day }
+  | Configure { budget :: Double, startSunday :: Maybe Bool }
   deriving (Generic, Show)
 
 instance ParseRecord LunchLineOptions
@@ -55,11 +60,28 @@ runApp = do
   opts <- getRecord "LunchLine"
   case opts of
     List -> summary
-    Add {name, amount, added} -> addNew (AddLineItem name amount added) >> summary
+    Configuration -> settingsSummary
+    Add {name, amount, added} -> do
+      runDB $ addItem (AddLineItem name amount added)
+      summary
+    Configure {budget, startSunday} -> do
+      runDB $ configureSettings (AddSettings budget startSunday)
+      settingsSummary
 
-addNew :: AddLineItem -> AppT ()
-addNew i = runDB $ do
-  addItem i
+settingsSummary :: AppT ()
+settingsSummary = do
+  summary' <- runDB $ selectOne getSettings
+  liftIO $ case summary' of
+    Nothing -> putStrLn "No settings yet!"
+    Just (Entity _ settings) ->
+      putStr $ ascii colSetting [settings]
+
+colSetting :: Colonnade Headed Settings String
+colSetting =
+  mconcat
+    [ headed "Budget" (show . settingsWeeklyBudget)
+    , headed "Start Sunday?" (show . settingsWeekStartsSunday)
+    ]
 
 -- | Print the remaining budget, as well as the meals from the past week.
 summary :: AppT ()

@@ -87,6 +87,45 @@ addItem AddLineItem{addName, addAmount} = do
           now
   insert_ li
 
+-- | Nicer to digest but slightly wasteful version of 'weeklySummary'
+-- The generated SQL looks like:
+-- [Debug#SQL] SELECT "settings"."id", "settings"."weekly_budget", "settings"."week_starts_sunday"
+-- FROM "settings"
+--  LIMIT 1; []
+-- [Debug#SQL] SELECT SUM("line_item"."amount")
+-- FROM "line_item"
+-- WHERE ("line_item"."added" >= ?) AND ("line_item"."added" <= ?)
+--  LIMIT 1; [PersistDay 2022-04-03,PersistDay 2022-04-10]
+-- [Debug#SQL] SELECT "line_item"."id", "line_item"."name", "line_item"."amount", "line_item"."added", "line_item"."created_at", "line_item"."updated_at"
+-- FROM "line_item"
+-- WHERE ("line_item"."added" >= ?) AND ("line_item"."added" <= ?)
+-- ; [PersistDay 2022-04-03,PersistDay 2022-04-10]
+weeklySummary'
+  :: MonadIO m
+  => Settings
+  -> SqlPersistT m (Double, [Entity LineItem])
+weeklySummary' Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
+  now <- liftIO getCurrentTime
+  let theWeek = weekInterval settingsWeekStartsSunday now
+  total <- getLineItemTotal theWeek
+  items <- select $ getItemsInInterval theWeek
+  pure (settingsWeeklyBudget - total, items)
+
+-- | Get all items /and/ their accumulated amount in one trip to the DB,
+-- using CTEs. Not as succinct as 'weeklySummary'' but hopefully marginally
+-- more efficient on the DB side (since we don't have to ask for line
+-- items twice.) Mostly done as an experiment to see if we could
+-- simulate windowing functions in some contexts.
+-- The generated SQL looks like:
+-- [Debug#SQL] WITH "cte" AS (SELECT "line_item"."id" AS "v_id", "line_item"."name" AS "v_name", "line_item"."amount" AS "v_amount", "line_item"."added" AS "v_added", "line_item"."created_at" AS "v_created_at", "line_item"."updated_at" AS "v_updated_at"
+-- FROM "line_item"
+-- WHERE ("line_item"."added" >= ?) AND ("line_item"."added" <= ?)
+-- ),
+-- "cte2" AS (SELECT SUM("cte"."v_amount") AS "v2"
+-- FROM "cte"
+-- )
+-- SELECT "cte2"."v2", "cte"."v_id", "cte"."v_name", "cte"."v_amount", "cte"."v_added", "cte"."v_created_at", "cte"."v_updated_at"
+-- FROM "cte", "cte2"
 weeklySummary
   :: MonadIO m
   => Settings
@@ -94,25 +133,22 @@ weeklySummary
 weeklySummary Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
   now <- liftIO getCurrentTime
   let theWeek = weekInterval settingsWeekStartsSunday now
-  total <- getLineItemTotal theWeek
-  items <- select $ getItemsInInterval theWeek
-  pure (settingsWeeklyBudget - total, items)
-
--- NOTE: the below would probably not work: can't really use aggregations
--- without grouping (or, in sqlite, it would just group implicitly)
--- weeklySummary
---   :: MonadIO m
---   => Settings
---   -> SqlPersistT m [(Entity LineItem, Value (Maybe Double))]
--- weeklySummary Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
---   now@(UTCTime today _) <- liftIO getCurrentTime
---   let theWeek = weekInterval settingsWeekStartsSunday now
---   select $ do
---     items <- getItemsInInterval theWeek
---     let totalSpent = sum_ $ items ^. LineItemAmount
---     pure (items, totalSpent)
-
-
+  summary <- select $ do
+    is <-
+      with $ do
+        getItemsInInterval theWeek
+    cnt <-
+      with $ do
+        items <- from is
+        pure $ sum_ $ items ^. LineItemAmount
+    items <- from is
+    agg   <- from cnt
+    pure (agg, items)
+  let mTotal =
+        maybe 0 (fromMaybe 0 . unValue . fst)
+        $ listToMaybe summary
+      allItems = map snd summary
+  pure (settingsWeeklyBudget - mTotal, allItems)
 
 
 -- NON-DB HELPERS

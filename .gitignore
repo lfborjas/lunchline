@@ -26,3 +26,4 @@ cabal.project.local~
 .vscode
 .direnv/*
 /.envrc
+/lunchline.db

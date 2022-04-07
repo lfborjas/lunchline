@@ -4,17 +4,16 @@
 module LunchLine.App where
 
 import Data.Pool
-import Database.Persist.Sqlite hiding (SqlPersistT)
+import Database.Persist.Sqlite hiding (Add, SqlPersistT)
 import Control.Monad.Reader
     ( MonadIO(..), ReaderT(..), MonadReader, asks )
 import Control.Monad.Logger
 import LunchLine.Models
-import Data.List (foldl')
-import Data.Maybe
-import Database.Esqueleto.Experimental
-import Data.Time.Clock (getCurrentTime, UTCTime (UTCTime))
+import Database.Esqueleto.Experimental hiding (Add)
 import Colonnade
 import Control.Monad (void)
+import Options.Generic
+import Data.Time (Day)
 
 data Env = Env
   { envPool :: Pool SqlBackend
@@ -23,6 +22,13 @@ data Env = Env
 newtype AppT a = AppT
   {unAppT :: ReaderT Env IO a }
   deriving newtype (Functor, Applicative, Monad, MonadReader Env, MonadIO)
+
+data LunchLineOptions
+  = List
+  | Add { name :: String, amount :: Double, added :: Maybe Day }
+  deriving (Generic, Show)
+
+instance ParseRecord LunchLineOptions
 
 runAppT :: MonadIO m => AppT a -> Env -> m a
 runAppT body env = liftIO $ runReaderT (unAppT body) env
@@ -45,12 +51,15 @@ runDB body = do
 -- https://github.com/MercuryTechnologies/mercury-web-backend/blob/70aa056ab6ce6d2d7cbc03917f2983a7b5896134/src/App.hs#L194-L208
 
 runApp :: AppT ()
-runApp = addStuff >> summary
+runApp = do
+  opts <- getRecord "LunchLine"
+  case opts of
+    List -> summary
+    Add {name, amount, added} -> addNew (AddLineItem name amount added) >> summary
 
-addStuff :: AppT ()
-addStuff = runDB $ do
-  addItem (AddLineItem "Pernil" 8.24)
-  addItem (AddLineItem "Pizza" 2)
+addNew :: AddLineItem -> AppT ()
+addNew i = runDB $ do
+  addItem i
 
 -- | Print the remaining budget, as well as the meals from the past week.
 summary :: AppT ()
@@ -78,7 +87,7 @@ colItem =
 appMain :: IO ()
 appMain = do
   --env <- runStderrLoggingT $ Env <$> createSqlitePool ":memory:" 10
-  runNoLoggingT $ withSqlitePool ":memory:" 10 $ \pool -> do
+  runNoLoggingT $ withSqlitePool "lunchline.db" 10 $ \pool -> do
     -- NOTE: the persistent book uses `runResourceT` here
     -- NOTE: from the exercise "figure out a way to move migrateAll to main"
     -- from: https://www.yesodweb.com/book/persistent#persistent_integration_with_yesod

@@ -34,6 +34,7 @@ Settings
 data AddLineItem = AddLineItem
   { addName :: String
   , addAmount :: Double
+  , addAdded :: Maybe Day
   }
 
 -- | Initialize settings unless already initialized
@@ -76,13 +77,13 @@ getLineItemTotal interval =
 addItem
   :: MonadIO m
   => AddLineItem -> SqlPersistT m ()
-addItem AddLineItem{addName, addAmount} = do
+addItem AddLineItem{addName, addAmount, addAdded} = do
   now@(UTCTime today _) <- liftIO getCurrentTime
   let li =
         LineItem
           addName
           addAmount
-          today
+          (fromMaybe today addAdded)
           now
           now
   insert_ li
@@ -157,7 +158,7 @@ weeklySummary Settings{settingsWeeklyBudget, settingsWeekStartsSunday} = do
 -- whether or not to start the week on Sunday, and a moment in the current day
 weekInterval :: Bool -> UTCTime -> (Day, Day)
 weekInterval startsOnSunday (UTCTime today _) =
-  (thisWeekStart, nextWeekStart)
+  (thisWeekStart, addDays (-1) nextWeekStart)
   where
     nextWeekStart =
       firstDayOfWeekOnAfter
